@@ -6,8 +6,9 @@
   var base = document.body.dataset.base || "";
 
   /* ---------- хранилище (может быть недоступно) ---------- */
-  function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
-  function save(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+  // patanV1 и patanV2 живут на одном домене — свои ключи, чтобы настройки не смешивались
+  function load(key) { try { return localStorage.getItem("patanV2-" + key); } catch (e) { return null; } }
+  function save(key, val) { try { localStorage.setItem("patanV2-" + key, val); } catch (e) {} }
 
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $all(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); }
