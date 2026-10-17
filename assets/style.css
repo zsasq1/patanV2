@@ -258,6 +258,11 @@ main { padding: 28px 0 96px; }
 .quiz .prep:not(.open) .name-hidden::after { content: "Что это за препарат?"; color: var(--muted-fg); }
 .quiz .prep:not(.open) h3 .name { display: none; }
 .quiz .prep:not(.open) .meta { display: none; }
+/* подписи к фото часто называют процесс — до ответа их не показываем */
+.quiz .prep:not(.open) .photo-credit { display: none; }
+.nophoto .short { display: none; }
+.quiz .prep:not(.open) .nophoto .short { display: inline; }
+.quiz .prep:not(.open) .nophoto .full { display: none; }
 
 /* ---------- вопросы ---------- */
 .qa-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 48px; }

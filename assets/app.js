@@ -67,6 +67,8 @@
     if (shuffleBtn) shuffleBtn.hidden = !on;
     $all(".open").forEach(function (el) { el.classList.remove("open"); });
     save("quiz-" + page, on ? "1" : "0");
+    // кнопка «Перемешать» пропадает вместе с самопроверкой — возвращаем обычный порядок
+    if (!on && shuffled) { shuffled = false; renderPreps(); }
   }
   if (quizBtn) quizBtn.addEventListener("click", function () {
     setQuiz(!document.body.classList.contains("quiz"));
@@ -78,23 +80,31 @@
 
   /* ---------- поиск ---------- */
   var searchInput = $("#search");
+  // запрос из одних цифр — это номер препарата или вопроса, ищем его точно, а не «5» внутри «57»
+  function matches(text, n, q) {
+    if (!q) return true;
+    if (/^\d+$/.test(q)) return String(n) === q;
+    return text.indexOf(q) !== -1;
+  }
   function applySearch() {
-    var q = norm(searchInput ? searchInput.value.trim() : "");
+    var q = norm(searchInput ? searchInput.value.trim() : "").replace(/^№\s*/, "");
     var shown = 0;
     $all("[data-text]").forEach(function (el) {
-      var ok = !q || el.dataset.text.indexOf(q) !== -1;
+      var ok = matches(el.dataset.text, el.dataset.n, q);
       el.hidden = !ok;
       if (ok) shown++;
     });
     $all("[data-group]").forEach(function (g) {
       var any = $all("[data-text]", g).some(function (el) { return !el.hidden; });
       g.hidden = !any;
+      var link = g.id && $('#toc a[href="#' + g.id + '"]');
+      if (link) link.hidden = !any;
     });
     var other = $("#other");
     if (other && page === "preps") {
       var ot = tab === "micro" ? "macro" : "micro";
       var n = q ? (DATA[ot] || []).reduce(function (acc, g) {
-        return acc + g.items.filter(function (it) { return itemText(it).indexOf(q) !== -1; }).length;
+        return acc + g.items.filter(function (it) { return matches(itemText(it), it.n, q); }).length;
       }, 0) : 0;
       other.hidden = !n;
       other.textContent = "Ещё " + n + " в разделе «" + (ot === "micro" ? "Микро" : "Макро") + "» — показать";
@@ -160,7 +170,7 @@
         if (p.credit) ph += '<div class="photo-credit"><span class="star">★</span> ' + p.credit + "</div>";
       });
     } else {
-      ph += '<div class="nophoto">' + (it.nophoto || "Фото этого препарата пока нет") + "</div>";
+      ph += '<div class="nophoto"><span class="full">' + (it.nophoto || "Фото этого препарата пока нет") + '</span><span class="short">Фото нет</span></div>';
     }
     ph += "</div>";
 
@@ -178,7 +188,7 @@
     body += mnemo(it.mnemo);
     if (it.star) body += '<div class="starblock">' + it.star + "</div>";
 
-    return '<article class="prep" id="' + it.id + '" data-text>' + ph +
+    return '<article class="prep" id="' + it.id + '" data-text data-n="' + it.n + '">' + ph +
       '<div class="prep-text">' +
       '<div class="prep-head"><div class="slide-label">' + it.n + '</div>' +
       '<h3 class="name-hidden"><span class="name">' + it.name + "</span></h3></div>" +
@@ -287,7 +297,7 @@
               var p = byId[id];
               return '<a class="chip" href="' + base + "#" + id + '">' + (p.kind === "micro" ? "Микро" : "Макро") + " № " + p.n + " · " + p.name + "</a>";
             }).join("");
-            return '<article class="qa" id="q-' + it.n + '" data-text>' +
+            return '<article class="qa" id="q-' + it.n + '" data-text data-n="' + it.n + '">' +
               '<h3 class="qa-q"><span class="qa-n">' + it.n + "</span><span>" + it.q + "</span></h3>" +
               '<button class="btn reveal" type="button">Показать ответ</button>' +
               '<div class="qa-body">' + (it.a || "") + remember(it.zapomni) + mnemo(it.mnemo) +
@@ -329,8 +339,11 @@
     gi = (i + gallery.length) % gallery.length;
     scale = 1; tx = 0; ty = 0;
     lbImg.src = gallery[gi].src;
-    lbImg.alt = gallery[gi].alt;
-    lbCap.textContent = gallery[gi].alt + (gallery.length > 1 ? " (" + (gi + 1) + " из " + gallery.length + ")" : "");
+    lbImg.alt = gallery.secret ? "Фото препарата" : gallery[gi].alt;
+    // в самопроверке подпись с названием выдала бы ответ
+    var pos = gallery.length > 1 ? (gi + 1) + " из " + gallery.length : "";
+    if (gallery.secret) lbCap.textContent = "Фото" + (pos ? " " + pos : "");
+    else lbCap.textContent = gallery[gi].alt + (pos ? " (" + pos + ")" : "");
     $(".lb-prev", lb).style.visibility = gallery.length > 1 ? "visible" : "hidden";
     $(".lb-next", lb).style.visibility = gallery.length > 1 ? "visible" : "hidden";
     applyT();
@@ -354,7 +367,9 @@
       seen[im.dataset.i] = true;
       imgs[+im.dataset.i] = { src: im.src, alt: im.alt };
     });
-    openLb(imgs.filter(Boolean), +img.dataset.i);
+    imgs = imgs.filter(Boolean);
+    imgs.secret = document.body.classList.contains("quiz") && !img.closest(".prep").classList.contains("open");
+    openLb(imgs, +img.dataset.i);
   });
   $(".lb-close", lb).addEventListener("click", closeLb);
   $(".lb-prev", lb).addEventListener("click", function () { show(gi - 1); });
