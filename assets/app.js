@@ -146,11 +146,13 @@
   });
 
   function photoSrc(p) { return base + p.src; }
+  // фото из атласов вписываем целиком, свои — кадрируем квадратом
+  function contain(p) { return !!p.credit; }
   var textCache = {};
   function itemText(it) {
     if (!textCache[it.id]) {
       var d = document.createElement("div");
-      d.innerHTML = [it.n, it.name, it.stain, it.tetrad, it.opis, (it.marks || []).join(" "), (it.zapomni || []).join(" "), it.mnemo, it.star].join(" ");
+      d.innerHTML = [it.n, it.name, it.stain, it.opis, (it.marks || []).join(" "), (it.zapomni || []).join(" "), it.mnemo, it.star].join(" ");
       textCache[it.id] = norm(d.textContent);
     }
     return textCache[it.id];
@@ -160,14 +162,15 @@
     var photos = it.photos || [];
     var ph = '<div class="prep-photos ' + it.kind + '">';
     if (photos.length) {
-      ph += '<img class="main' + (photos[0].credit ? " contain" : "") + '" src="' + photoSrc(photos[0]) + '" alt="' + (photos[0].alt || it.name) + '" loading="lazy" data-i="0">';
+      ph += '<img class="main' + (contain(photos[0]) ? " contain" : "") + '" src="' + photoSrc(photos[0]) + '" alt="' + (photos[0].alt || it.name) + '" loading="lazy" draggable="false" data-i="0">';
       if (photos.length > 1) {
         ph += '<div class="thumbs">' + photos.map(function (p, i) {
-          return '<img src="' + photoSrc(p) + '" alt="' + (p.alt || it.name) + '" loading="lazy" data-i="' + i + '">';
+          return '<img' + (i ? "" : ' class="cur"') + ' src="' + photoSrc(p) + '" alt="' + (p.alt || it.name) + '" loading="lazy" draggable="false" data-i="' + i + '">';
         }).join("") + "</div>";
       }
+      // под фото — только пояснения; кто автор и какая лицензия — в списке «Источники фото» внизу страницы
       photos.forEach(function (p) {
-        if (p.credit) ph += '<div class="photo-credit"><span class="star">★</span> ' + p.credit + "</div>";
+        if (p.note) ph += '<div class="photo-note"><span class="star">★</span> ' + p.note + "</div>";
       });
     } else {
       ph += '<div class="nophoto"><span class="full">' + (it.nophoto || "Фото этого препарата пока нет") + '</span><span class="short">Фото нет</span></div>';
@@ -176,7 +179,6 @@
 
     var meta = "";
     if (it.stain) meta += "<div>Окраска: " + it.stain + "</div>";
-    if (it.tetrad) meta += "<div>" + it.tetrad + "</div>";
 
     var body = "";
     if (it.opis) body += "<h4>Описание</h4>" + it.opis;
@@ -192,7 +194,7 @@
       '<div class="prep-text">' +
       '<div class="prep-head"><div class="slide-label">' + it.n + '</div>' +
       '<h3 class="name-hidden"><span class="name">' + it.name + "</span></h3></div>" +
-      '<div class="meta">' + meta + "</div>" +
+      (meta ? '<div class="meta">' + meta + "</div>" : "") +
       '<button class="btn reveal" type="button">Показать ответ</button>' +
       '<div class="hideable">' + body + "</div>" +
       "</div></article>";
@@ -273,7 +275,58 @@
       renderPreps();
       window.scrollTo(0, 0);
     });
+    renderCredits();
   }
+
+  /* ---------- источники фото: одним списком внизу, без названий препаратов (не подсказка в самопроверке) ---------- */
+  function renderCredits() {
+    var rows = [];
+    ["micro", "macro"].forEach(function (k) {
+      (DATA[k] || []).forEach(function (g) {
+        g.items.forEach(function (it) {
+          var seen = {}, cr = [];
+          (it.photos || []).forEach(function (p) {
+            if (p.credit && !seen[p.credit]) { seen[p.credit] = true; cr.push(p.credit); }
+          });
+          if (cr.length) rows.push("<li>" + (k === "micro" ? "Микро" : "Макро") + " № " + it.n + ": " + cr.join(" ") + "</li>");
+        });
+      });
+    });
+    if (!rows.length) return;
+    var d = document.createElement("details");
+    d.className = "credits";
+    d.id = "credits";
+    d.innerHTML = "<summary>Источники фото</summary><ul>" + rows.join("") + "</ul>";
+    $("main").appendChild(d);
+  }
+
+  /* ---------- свайп по главному фото в карточке ---------- */
+  var swipeStart = null, swipedAt = 0;
+  function setMain(img, k) {
+    var it = byId[img.closest(".prep").id];
+    var photos = (it && it.photos) || [];
+    if (photos.length < 2) return;
+    k = (k + photos.length) % photos.length;
+    img.src = photoSrc(photos[k]);
+    img.alt = photos[k].alt || it.name;
+    img.dataset.i = k;
+    img.classList.toggle("contain", contain(photos[k]));
+    $all(".thumbs img", img.parentNode).forEach(function (t) { t.classList.toggle("cur", +t.dataset.i === k); });
+  }
+  document.addEventListener("pointerdown", function (e) {
+    var img = e.target.closest && e.target.closest(".prep-photos img.main");
+    swipeStart = img ? { img: img, x: e.clientX, y: e.clientY } : null;
+  });
+  document.addEventListener("pointerup", function (e) {
+    var s = swipeStart;
+    swipeStart = null;
+    if (!s) return;
+    var dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    swipedAt = Date.now();
+    setMain(s.img, +s.img.dataset.i + (dx < 0 ? 1 : -1));
+  });
+  document.addEventListener("pointercancel", function () { swipeStart = null; });
 
   /* ---------- страница вопросов ---------- */
   if (page === "voprosy") {
@@ -308,6 +361,13 @@
       }).join("");
       var c = $("#qcount");
       if (c) c.textContent = total;
+      // для телефона: каждой ячейке — название её колонки (см. style.css)
+      $all(".qa-body table").forEach(function (t) {
+        var heads = $all("thead th", t).map(function (th) { return th.textContent.trim(); });
+        $all("tbody tr", t).forEach(function (tr) {
+          $all("td", tr).forEach(function (td, i) { if (heads[i]) td.dataset.label = heads[i]; });
+        });
+      });
     }
     setQuiz(load("quiz-voprosy") === "1");
     indexText();
@@ -346,8 +406,12 @@
     else lbCap.textContent = gallery[gi].alt + (pos ? " (" + pos + ")" : "");
     $(".lb-prev", lb).style.visibility = gallery.length > 1 ? "visible" : "hidden";
     $(".lb-next", lb).style.visibility = gallery.length > 1 ? "visible" : "hidden";
+    fitBar();
     applyT();
   }
+  // подпись бывает в 1–3 строки — фото не должно заходить под нижнюю панель
+  function fitBar() { lb.style.setProperty("--bar", $(".lb-bar", lb).offsetHeight + "px"); }
+  window.addEventListener("resize", function () { if (lb.classList.contains("on")) fitBar(); });
   function openLb(imgs, i) {
     gallery = imgs; lastFocus = document.activeElement;
     lb.classList.add("on"); document.body.style.overflow = "hidden";
@@ -359,7 +423,7 @@
   }
   document.addEventListener("click", function (e) {
     var img = e.target.closest(".prep-photos img");
-    if (!img) return;
+    if (!img || Date.now() - swipedAt < 400) return; // это был свайп, а не нажатие
     var wrap = img.closest(".prep-photos");
     var seen = {}, imgs = [];
     $all("img", wrap).forEach(function (im) {
@@ -374,7 +438,7 @@
   $(".lb-close", lb).addEventListener("click", closeLb);
   $(".lb-prev", lb).addEventListener("click", function () { show(gi - 1); });
   $(".lb-next", lb).addEventListener("click", function () { show(gi + 1); });
-  lb.addEventListener("click", function (e) { if (e.target === lb) closeLb(); });
+  lb.addEventListener("click", function (e) { if (e.target === lb && Date.now() - swipedAt > 400) closeLb(); });
   document.addEventListener("keydown", function (e) {
     if (!lb.classList.contains("on")) return;
     if (e.key === "Escape") closeLb();
@@ -400,17 +464,23 @@
     }
     applyT();
   });
-  lbImg.addEventListener("pointerdown", function (e) {
-    lbImg.setPointerCapture(e.pointerId);
+  // свайп вбок листает фото (и по самому фото, и по тёмному фону вокруг); при увеличении палец двигает фото
+  var lbSwipe = null;
+  lb.addEventListener("pointerdown", function (e) {
+    if (e.target.closest("button")) return;
+    if (e.target === lbImg) lbImg.setPointerCapture(e.pointerId);
     pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
     var ids = Object.keys(pointers);
     if (ids.length === 2) {
       var a = pointers[ids[0]], b = pointers[ids[1]];
       startDist = Math.hypot(a.x - b.x, a.y - b.y); startScale = scale;
+      lbSwipe = null;
+    } else {
+      lbSwipe = scale === 1 && gallery.length > 1 ? { x: e.clientX, y: e.clientY } : null;
     }
     last = { x: e.clientX, y: e.clientY };
   });
-  lbImg.addEventListener("pointermove", function (e) {
+  lb.addEventListener("pointermove", function (e) {
     if (!pointers[e.pointerId]) return;
     pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
     var ids = Object.keys(pointers);
@@ -420,13 +490,26 @@
       scale = Math.min(8, Math.max(1, startScale * d / startDist));
       if (scale === 1) { tx = ty = 0; }
       applyT();
+    } else if (lbSwipe) {
+      tx = e.clientX - lbSwipe.x; // фото едет за пальцем
+      applyT();
     } else if (ids.length === 1 && scale > 1 && last) {
       tx += e.clientX - last.x; ty += e.clientY - last.y;
       last = { x: e.clientX, y: e.clientY };
       applyT();
     }
   });
-  function up(e) { delete pointers[e.pointerId]; last = null; }
-  lbImg.addEventListener("pointerup", up);
-  lbImg.addEventListener("pointercancel", up);
+  function up(e) {
+    if (!pointers[e.pointerId]) return;
+    delete pointers[e.pointerId]; last = null;
+    var s = lbSwipe;
+    lbSwipe = null;
+    if (!s) return;
+    var dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (Math.abs(dx) > 10) swipedAt = Date.now();
+    if (e.type === "pointerup" && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) show(gi + (dx < 0 ? 1 : -1));
+    else { tx = 0; applyT(); }
+  }
+  lb.addEventListener("pointerup", up);
+  lb.addEventListener("pointercancel", up);
 })();

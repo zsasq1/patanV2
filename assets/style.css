@@ -75,7 +75,11 @@ body {
   color: var(--fg);
   font: 400 17px/1.6 var(--sans);
   -webkit-font-smoothing: antialiased;
+  /* длинные слова вроде «Артериолосклеротический» на узком экране переносим, а не вылезаем за край */
+  overflow-wrap: break-word;
 }
+h1, h2, h3 { hyphens: auto; -webkit-hyphens: auto; }
+.prep-head > h3, .qa-q > span:last-child { min-width: 0; }
 img { max-width: 100%; display: block; }
 a { color: var(--term); text-underline-offset: 3px; }
 button, input { font: inherit; color: inherit; }
@@ -206,7 +210,14 @@ main { padding: 28px 0 96px; }
   border: 1px solid var(--border); transition: border-color var(--ease);
 }
 .thumbs img:hover { border-color: var(--primary); }
-.photo-credit { font-size: 14px; line-height: 1.5; color: var(--muted-fg); }
+.thumbs img.cur { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+/* главное фото листается свайпом вбок, вертикальная прокрутка страницы остаётся */
+.prep-photos .main { touch-action: pan-y; user-select: none; -webkit-user-drag: none; }
+.photo-credit, .photo-note { font-size: 14px; line-height: 1.5; color: var(--muted-fg); }
+.credits { margin: 40px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted-fg); }
+.credits summary { cursor: pointer; font-weight: 600; color: var(--fg); padding: 10px 0; }
+.credits ul { margin: 4px 0 0; padding-left: 20px; }
+.credits li + li { margin-top: 4px; }
 .nophoto {
   aspect-ratio: 1 / 1; border: 1px dashed var(--border); border-radius: var(--radius);
   display: grid; place-items: center; color: var(--muted-fg); padding: 16px; text-align: center;
@@ -259,7 +270,7 @@ main { padding: 28px 0 96px; }
 .quiz .prep:not(.open) h3 .name { display: none; }
 .quiz .prep:not(.open) .meta { display: none; }
 /* подписи к фото часто называют процесс — до ответа их не показываем */
-.quiz .prep:not(.open) .photo-credit { display: none; }
+.quiz .prep:not(.open) .photo-note { display: none; }
 .nophoto .short { display: none; }
 .quiz .prep:not(.open) .nophoto .short { display: inline; }
 .quiz .prep:not(.open) .nophoto .full { display: none; }
@@ -313,8 +324,10 @@ main { padding: 28px 0 96px; }
   display: none; touch-action: none;
 }
 .lb.on { display: block; }
+/* фото — между кнопкой «Закрыть» (64px сверху) и нижней панелью; её высоту (--bar) задаёт app.js */
 .lb img {
-  position: absolute; top: 50%; left: 50%; max-width: 96vw; max-height: 84vh;
+  position: absolute; left: 50%; top: calc((64px + 100% - var(--bar, 76px)) / 2);
+  max-width: 96vw; max-height: calc(100% - 64px - var(--bar, 76px) - 8px);
   transform-origin: center; user-select: none; -webkit-user-drag: none; cursor: grab;
 }
 .lb-bar {
@@ -365,7 +378,17 @@ main { padding: 28px 0 96px; }
   .qa { padding: 16px; border-radius: var(--radius); }
   .qa-q { font-size: 18px; gap: 10px; }
   .quiz .qa .reveal { margin-left: 0; }
-  .qa-body table { display: block; overflow-x: auto; }
+  /* таблица не влезает в телефон — каждая строка становится плашкой, название колонки над значением */
+  .qa-body table, .qa-body tbody, .qa-body tr, .qa-body td { display: block; }
+  .qa-body thead { display: none; }
+  .qa-body tr { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .qa-body tr + tr { margin-top: 8px; }
+  .qa-body td { border: 0; padding: 8px 12px; }
+  .qa-body td + td { border-top: 1px solid var(--border); }
+  .qa-body td:first-child { background: var(--muted); font-weight: 600; }
+  .qa-body td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 13px; font-weight: 600; color: var(--muted-fg);
+  }
   .prep, .qa, section[id] { scroll-margin-top: 12px; }
   .search-wrap { flex-basis: 120px; }
   .legend { font-size: 14px; gap: 2px 14px; }
