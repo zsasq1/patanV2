@@ -158,24 +158,35 @@
     return textCache[it.id];
   }
 
-  function prepCard(it) {
-    var photos = it.photos || [];
+  // o.secret: для флеш-карточек — в alt нет названия, фото грузятся сразу; o.notes: пояснения под фото; o.photos: свой набор фото
+  function photoBlock(it, o) {
+    o = o || {};
+    var secret = o.secret, photos = o.photos || it.photos || [];
     var ph = '<div class="prep-photos ' + it.kind + '">';
+    var alt = function (p) { return secret ? "Фото препарата" : (p.alt || it.name); };
+    var lazy = secret ? "" : ' loading="lazy"';
     if (photos.length) {
-      ph += '<img class="main' + (contain(photos[0]) ? " contain" : "") + '" src="' + photoSrc(photos[0]) + '" alt="' + (photos[0].alt || it.name) + '" loading="lazy" draggable="false" data-i="0">';
+      ph += '<img class="main' + (contain(photos[0]) ? " contain" : "") + '" src="' + photoSrc(photos[0]) + '" alt="' + alt(photos[0]) + '"' + lazy + ' draggable="false" data-i="0">';
       if (photos.length > 1) {
         ph += '<div class="thumbs">' + photos.map(function (p, i) {
-          return '<img' + (i ? "" : ' class="cur"') + ' src="' + photoSrc(p) + '" alt="' + (p.alt || it.name) + '" loading="lazy" draggable="false" data-i="' + i + '">';
+          return '<img' + (i ? "" : ' class="cur"') + ' src="' + photoSrc(p) + '" alt="' + alt(p) + '"' + lazy + ' draggable="false" data-i="' + i + '">';
         }).join("") + "</div>";
       }
       // под фото — только пояснения; кто автор и какая лицензия — в списке «Источники фото» внизу страницы
-      photos.forEach(function (p) {
-        if (p.note) ph += '<div class="photo-note"><span class="star">★</span> ' + p.note + "</div>";
-      });
+      if (o.notes) ph += photoNotes(it);
     } else {
       ph += '<div class="nophoto"><span class="full">' + (it.nophoto || "Фото этого препарата пока нет") + '</span><span class="short">Фото нет</span></div>';
     }
-    ph += "</div>";
+    return ph + "</div>";
+  }
+  function photoNotes(it) {
+    return (it.photos || []).map(function (p) {
+      return p.note ? '<div class="photo-note"><span class="star">★</span> ' + p.note + "</div>" : "";
+    }).join("");
+  }
+
+  function prepCard(it) {
+    var ph = photoBlock(it, { notes: true });
 
     var meta = "";
     if (it.stain) meta += "<div>Окраска: " + it.stain + "</div>";
@@ -303,12 +314,13 @@
   /* ---------- свайп по главному фото в карточке ---------- */
   var swipeStart = null, swipedAt = 0;
   function setMain(img, k) {
-    var it = byId[img.closest(".prep").id];
-    var photos = (it && it.photos) || [];
+    var holder = img.closest(".prep, .fc");
+    var it = byId[holder.dataset.id || holder.id];
+    var photos = holder.photos || (it && it.photos) || [];
     if (photos.length < 2) return;
     k = (k + photos.length) % photos.length;
     img.src = photoSrc(photos[k]);
-    img.alt = photos[k].alt || it.name;
+    if (!holder.classList.contains("fc") || holder.classList.contains("flipped")) img.alt = photos[k].alt || it.name;
     img.dataset.i = k;
     img.classList.toggle("contain", contain(photos[k]));
     $all(".thumbs img", img.parentNode).forEach(function (t) { t.classList.toggle("cur", +t.dataset.i === k); });
@@ -327,6 +339,135 @@
     setMain(s.img, +s.img.dataset.i + (dx < 0 ? 1 : -1));
   });
   document.addEventListener("pointercancel", function () { swipeStart = null; });
+
+  /* ---------- флеш-карточки: фото → вспомнить название → «Знаю» / «Не знаю» ---------- */
+  if (page === "cards") {
+    var fcEl = $("#fc"), fcCount = $("#fc-count"), fcBar = $("#fc-bar");
+    // в колоду идут только препараты с фото
+    var deckIds = { micro: [], macro: [] };
+    ["micro", "macro"].forEach(function (k) {
+      (DATA[k] || []).forEach(function (g) {
+        g.items.forEach(function (it) { if ((it.photos || []).length) deckIds[k].push(it.id); });
+      });
+    });
+    deckIds.all = deckIds.micro.concat(deckIds.macro);
+    $all("[data-deck]").forEach(function (b) {
+      var c = $(".count", b);
+      if (c) c.textContent = deckIds[b.dataset.deck].length;
+    });
+
+    var st = null;
+    try { st = JSON.parse(load("cards") || "null"); } catch (e) { st = null; }
+    // сохранённая колода годится, только если все её карточки ещё есть на сайте
+    if (!st || !deckIds[st.deck] || !st.queue || !st.queue.every(function (id) { return byId[id]; })) st = null;
+
+    function shuffle(a) {
+      a = a.slice();
+      for (var i = a.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = a[i]; a[i] = a[j]; a[j] = t;
+      }
+      return a;
+    }
+    function startDeck(deck, ids) {
+      ids = shuffle(ids || deckIds[deck]);
+      st = { deck: deck, queue: ids, wrong: [], total: ids.length };
+      saveState();
+      renderCard();
+    }
+    function saveState() { save("cards", JSON.stringify(st)); }
+
+    function renderCard() {
+      $all("[data-deck]").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.deck === st.deck ? "true" : "false"); });
+      var left = st.queue.length, done = st.total - left;
+      fcCount.textContent = left ? "Осталось " + left + " из " + st.total : "Готово";
+      fcBar.style.width = (st.total ? Math.round(done / st.total * 100) : 0) + "%";
+      if (!left) {
+        var right = st.total - st.wrong.length;
+        fcEl.innerHTML = '<div class="fc fc-done"><h2>Колода пройдена</h2>' +
+          "<p>С первого раза узнали " + right + " из " + st.total + ".</p>" +
+          '<div class="fc-actions">' +
+          (st.wrong.length ? '<button class="btn primary" type="button" data-act="wrong">Повторить ошибки (' + st.wrong.length + ")</button>" : "") +
+          '<button class="btn' + (st.wrong.length ? "" : " primary") + '" type="button" data-act="again">Пройти заново</button></div></div>';
+        return;
+      }
+      var it = byId[st.queue[0]];
+      var front = frontPhotos(it);
+      fcEl.innerHTML = '<article class="fc" data-id="' + it.id + '">' + photoBlock(it, { secret: true, photos: front }) +
+        '<div class="fc-back" hidden>' +
+        '<div class="fc-name"><span class="slide-label">' + it.n + '</span><h2>' + it.name + "</h2></div>" +
+        '<div class="fc-kind">' + (it.kind === "micro" ? "Микропрепарат" : "Макропрепарат") + (it.stain ? " · окраска: " + it.stain : "") + "</div>" +
+        photoNotes(it) +
+        '<a class="fc-more" href="' + base + "#" + it.id + '">Описание препарата</a></div>' +
+        '<div class="fc-actions">' +
+        '<button class="btn primary fc-flip" type="button" data-act="flip">Показать название</button>' +
+        '<button class="btn fc-ans" type="button" data-act="no" hidden>Не знаю</button>' +
+        '<button class="btn primary fc-ans" type="button" data-act="yes" hidden>Знаю</button>' +
+        "</div></article>";
+      $(".fc", fcEl).photos = front;
+    }
+    // до ответа: банки с закрашенными этикетками (img/macro-fc), у микро — без фото стекла с номером (*-s.jpg)
+    function frontPhotos(it) {
+      var ph = (it.photos || []).filter(function (p) { return !/-s\.jpg$/.test(p.src); });
+      if (!ph.length) ph = it.photos || [];
+      return ph.map(function (p) {
+        return it.kind === "macro" ? { src: p.src.replace("img/macro/", "img/macro-fc/"), alt: p.alt, credit: p.credit } : p;
+      });
+    }
+    function flip() {
+      var card = $(".fc[data-id]", fcEl);
+      if (!card || card.classList.contains("flipped")) return;
+      var it = byId[card.dataset.id];
+      card.classList.add("flipped");
+      $(".fc-back", card).hidden = false;
+      $(".fc-flip", card).hidden = true;
+      $all(".fc-ans", card).forEach(function (b) { b.hidden = false; });
+      // после ответа — все фото как есть: с этикетками и фото стекла
+      var box = document.createElement("div");
+      box.innerHTML = photoBlock(it);
+      card.replaceChild(box.firstChild, $(".prep-photos", card));
+      card.photos = null;
+      $('[data-act="yes"]', card).focus({ preventScroll: true });
+    }
+    function answer(knew) {
+      var id = st.queue.shift();
+      if (!knew) {
+        if (st.wrong.indexOf(id) === -1) st.wrong.push(id);
+        // забытая карточка вернётся через пару других
+        st.queue.splice(Math.min(3, st.queue.length), 0, id);
+      }
+      saveState();
+      renderCard();
+      var top = fcEl.getBoundingClientRect().top;
+      if (top < 0) window.scrollBy(0, top - 12);
+    }
+    fcEl.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-act]");
+      if (!b) return;
+      var a = b.dataset.act;
+      if (a === "flip") flip();
+      else if (a === "yes" || a === "no") answer(a === "yes");
+      else if (a === "wrong") startDeck(st.deck, st.wrong);
+      else if (a === "again") startDeck(st.deck);
+    });
+    $all("[data-deck]").forEach(function (b) {
+      b.addEventListener("click", function () { startDeck(b.dataset.deck); });
+    });
+    var restart = $("#fc-restart");
+    if (restart) restart.addEventListener("click", function () { startDeck(st.deck); });
+    document.addEventListener("keydown", function (e) {
+      if (document.querySelector(".lb.on") || (e.target.closest && e.target.closest("input, textarea"))) return;
+      var card = $(".fc[data-id]", fcEl);
+      if (!card) return;
+      var flipped = card.classList.contains("flipped");
+      if (!flipped && (e.key === " " || e.key === "Enter")) { e.preventDefault(); flip(); }
+      else if (flipped && (e.key === "ArrowRight" || e.key === "2")) answer(true);
+      else if (flipped && (e.key === "ArrowLeft" || e.key === "1")) answer(false);
+    });
+
+    if (st) renderCard();
+    else startDeck("micro");
+  }
 
   /* ---------- страница вопросов ---------- */
   if (page === "voprosy") {
@@ -432,7 +573,9 @@
       imgs[+im.dataset.i] = { src: im.src, alt: im.alt };
     });
     imgs = imgs.filter(Boolean);
-    imgs.secret = document.body.classList.contains("quiz") && !img.closest(".prep").classList.contains("open");
+    var holder = img.closest(".prep, .fc");
+    imgs.secret = holder.classList.contains("fc") ? !holder.classList.contains("flipped")
+      : document.body.classList.contains("quiz") && !holder.classList.contains("open");
     openLb(imgs, +img.dataset.i);
   });
   $(".lb-close", lb).addEventListener("click", closeLb);
